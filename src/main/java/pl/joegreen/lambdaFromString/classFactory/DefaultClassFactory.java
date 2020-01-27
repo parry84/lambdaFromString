@@ -3,7 +3,13 @@ package pl.joegreen.lambdaFromString.classFactory;
 import javax.tools.DiagnosticCollector;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaFileObject;
+import javax.tools.StandardJavaFileManager;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.io.StringWriter;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -35,7 +41,6 @@ public class DefaultClassFactory implements ClassFactory {
     protected Map<String, CompiledClassJavaObject> compileClasses(
             String fullClassName, String sourceCode, JavaCompiler compiler, List<String> additionalCompilerOptions) throws ClassCompilationException {
 
-        ClassSourceJavaObject classSourceObject = new ClassSourceJavaObject(fullClassName, sourceCode);
         /*
          * diagnosticListener = null -> compiler's default reporting
 		 * diagnostics; locale = null -> default locale to format diagnostics;
@@ -45,9 +50,18 @@ public class DefaultClassFactory implements ClassFactory {
             StringWriter stdErrWriter = new StringWriter();
             DiagnosticCollector<JavaFileObject> diagnosticsCollector = new DiagnosticCollector<>();
             List<String> finalCompilerOptions = mergeStringLists(getDefaultCompilerOptions(), additionalCompilerOptions);
+
+            final String tmpDir = System.getProperty("java.io.tmpdir");
+            final String sourceClassPath = tmpDir + fullClassName.replaceAll("\\.", "/") + JavaFileObject.Kind.SOURCE.extension;
+            StandardJavaFileManager tmpFileManager = compiler.getStandardFileManager(null, null, null);
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(sourceClassPath))) {
+                writer.write(sourceCode);
+            }
+
+            Iterable<? extends JavaFileObject> inputFile = tmpFileManager.getJavaFileObjects(sourceClassPath);
             JavaCompiler.CompilationTask compilationTask = compiler.getTask(stdErrWriter,
                     stdFileManager, diagnosticsCollector,
-                    finalCompilerOptions, null, Collections.singletonList(classSourceObject));
+                    finalCompilerOptions, null, inputFile);
 
             boolean status = compilationTask.call();
             if (!status) {
@@ -55,12 +69,15 @@ public class DefaultClassFactory implements ClassFactory {
                         new CompilationDetails(fullClassName, sourceCode,
                                 diagnosticsCollector.getDiagnostics(), stdErrWriter.toString()));
             }
+            Files.delete(Paths.get(sourceClassPath));
             return stdFileManager.getClasses();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
     protected List<String> getDefaultCompilerOptions() {
-        return Arrays.asList("-target", "1.8", "-source", "1.8");
+        return Arrays.asList("-target", "11", "-source", "11", "-proc:none");
     }
 
     private List<String> mergeStringLists(List<String> firstList, List<String> sendList) {
